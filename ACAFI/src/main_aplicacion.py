@@ -14,8 +14,9 @@ from pathlib import Path
 
 
 # Retrocede un nivel desde la carpeta de scripts
-ruta_raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-config_path = os.path.join(ruta_raiz,"config","config.json")
+# Usar Path en lugar de os.path para la ruta raíz
+ruta_raiz = Path(__file__).parent.parent
+config_path = ruta_raiz / "config" / "config.json"
 with open(config_path, 'r') as file:
     config = json.load(file)
 
@@ -23,12 +24,12 @@ with open(config_path, 'r') as file:
 pytesseract.pytesseract.tesseract_cmd = config["paths"]["tesseract"]
 
 # Rutas principales
-carpeta = config["paths"]["inputs"]
-carpeta_descargas = config["paths"]["downloads"]
-path_pdf = config["paths"]["pdf"]
-config_folder = config["paths"]["config"]
-output_folder = config["paths"]["output"]
-origen = config["paths"]["origen_folder"]
+carpeta = ruta_raiz / config["paths"]["inputs"]
+carpeta_descargas = ruta_raiz / config["paths"]["downloads"]
+path_pdf = ruta_raiz / config["paths"]["pdf"]
+config_folder = ruta_raiz / config["paths"]["config"]
+output_folder = ruta_raiz / config["paths"]["output"]
+origen = ruta_raiz / config["paths"]["origen_folder"]
 destino = carpeta
 # Obtener la lista de documentos a excluir
 documentos_excluir = config.get("tipo_documento_excluir", [])
@@ -94,50 +95,53 @@ def enviar_correo(archivo):
     except Exception as e:
         print(f"❌ Error al enviar el correo electrónico: {e}")
 
+
 def mover_excels(origen, destino):
     """
     Mueve todos los archivos Excel de una carpeta origen a una carpeta destino.
-    
+
     Parámetros:
         origen (str): Ruta de la carpeta donde se buscarán los archivos Excel.
         destino (str): Ruta de la carpeta donde se moverán los archivos.
-    
+
     Retorna:
         tuple: (archivos_movidos, mensaje)
     """
     # Validar si la carpeta origen existe
     if not os.path.exists(origen):
         return [], f"Error: La carpeta origen '{origen}' no existe."
-    
+
     # Crear carpeta destino si no existe
     os.makedirs(destino, exist_ok=True)
-    
+
     # Buscar archivos Excel (.xlsx y .xls)
+
     archivos_excel = [
         f for f in os.listdir(origen)
         if f.endswith(('.xlsx', '.xls'))
     ]
-    
+
     # Mover archivos
     archivos_movidos = []
     for archivo in archivos_excel:
         origen_path = os.path.join(origen, archivo)
         destino_path = os.path.join(destino, archivo)
-        
+
         # Mover y evitar sobrescribir
         if os.path.exists(destino_path):
             base, ext = os.path.splitext(archivo)
             nuevo_nombre = f"{base}_DUPLICADO{ext}"
             destino_path = os.path.join(destino, nuevo_nombre)
-        
+
         shutil.move(origen_path, destino_path)
         archivos_movidos.append(archivo)
-    
+
     # Mensaje de resultado
     if not archivos_excel:
         return [], f"No se encontraron archivos Excel en '{origen}'."
     else:
         return archivos_movidos, f"Se movieron {len(archivos_excel)} archivos a '{destino}'."
+
 
 archivos, mensaje = mover_excels(origen, destino)
 print(mensaje)
@@ -158,11 +162,12 @@ while ejecuciones_realizadas < max_ejecuciones:
                     config_folder, "ruta_excel.json")
                 nombre_archivo = ruta_archivo.split("\\")[-1]
                 # Cargar el archivo Excel
-                df = pd.read_excel(ruta_archivo, engine="openpyxl")                
+                df = pd.read_excel(ruta_archivo, engine="openpyxl")
                 # Extrae el NIT (todo antes del primer '(', '_' o '.')
                 nit_receptor = re.split(r'[_(.]', nombre_archivo)[0]
-                #cargar el archivo excel que contiene la base de datos con los codigos de producto
-                bd_terceros_path = os.path.join(config_folder,f"{nit_receptor}.xlsx")
+                # cargar el archivo excel que contiene la base de datos con los codigos de producto
+                bd_terceros_path = os.path.join(
+                    config_folder, f"{nit_receptor}.xlsx")
                 df2 = pd.read_excel(bd_terceros_path)
                 # Si las columnas "Procesado" e "Información PDF" no existen, las creamos
                 if columna_procesado not in df.columns:
@@ -197,29 +202,35 @@ while ejecuciones_realizadas < max_ejecuciones:
                     print(
                         f"El archivo {archivo} ya está completamente procesado. Saltando...")
                     continue  # Saltar este archivo y continuar con el siguiente
-                
+
                 # Paso 1: Verificar y crear las columnas si no existen
-                columnas_requeridas = ['Nombre del producto', 'codigo de producto', 'centro de costos']
+                columnas_requeridas = ['Nombre del producto',
+                                       'codigo de producto', 'centro de costos']
 
                 for columna in columnas_requeridas:
                     if columna not in df.columns:
                         df[columna] = ''  # Crear la columna con valores vacíos
-                
+
                 # Paso 1: Convertir las columnas relevantes a tipo str
-                df['Nombre del producto'] = df['Nombre del producto'].astype(str)
+                df['Nombre del producto'] = df['Nombre del producto'].astype(
+                    str)
                 df['codigo de producto'] = df['codigo de producto'].astype(str)
                 df['centro de costos'] = df['centro de costos'].astype(str)
 
                 # Convertir columnas relevantes de df2 a tipo str
                 df2['Nit emisor'] = df2['Nit emisor'].astype(str)
-                df2['Nombre del producto'] = df2['Nombre del producto'].astype(str)
-                df2['Código del Producto'] = df2['Código del Producto'].fillna(0).astype(float).astype(int).astype(str)  # Manejar NaN
+                df2['Nombre del producto'] = df2['Nombre del producto'].astype(
+                    str)
+                df2['Código del Producto'] = df2['Código del Producto'].fillna(
+                    0).astype(float).astype(int).astype(str)  # Manejar NaN
                 df2['Centro de Costo'] = df2['Centro de Costo'].astype(str)
 
                 # Paso 2: Recorrer cada fila del archivo principal (df)
                 for indice, fila in df.iterrows():
-                    nit_amisor = fila['NIT Emisor']  # Obtener el NIT Emisor de la fila actual
-                    bd_nit_emisor = df2['Nit emisor'].astype(str)  # Asegurar que el NIT en df2 sea str
+                    # Obtener el NIT Emisor de la fila actual
+                    nit_amisor = fila['NIT Emisor']
+                    bd_nit_emisor = df2['Nit emisor'].astype(
+                        str)  # Asegurar que el NIT en df2 sea str
 
                     # Buscar coincidencias en el archivo de búsqueda (df2)
                     coincidencias = df2[bd_nit_emisor == str(nit_amisor)]
@@ -229,7 +240,8 @@ while ejecuciones_realizadas < max_ejecuciones:
                         # Tomar la primera coincidencia
                         primera_coincidencia = coincidencias.iloc[0]
                         df.at[indice, 'Nombre del producto'] = primera_coincidencia['Nombre del producto']
-                        df.at[indice, 'codigo de producto'] = primera_coincidencia['Código del Producto']  # Ya es str
+                        # Ya es str
+                        df.at[indice, 'codigo de producto'] = primera_coincidencia['Código del Producto']
                         df.at[indice, 'centro de costos'] = primera_coincidencia['Centro de Costo']
                     else:
                         # Si no hay coincidencias, asignar "sin coincidencia" y dejar las otras columnas en blanco
@@ -244,14 +256,15 @@ while ejecuciones_realizadas < max_ejecuciones:
                     print("La columna 'CUFE/CUDE' no existe en el DataFrame.")
 
                 # Paso 4: Guardar el DataFrame actualizado en un archivo Excel
-                df.to_excel(ruta_archivo, index=False)  # Usar index=False para evitar guardar el índice
+                # Usar index=False para evitar guardar el índice
+                df.to_excel(ruta_archivo, index=False)
                 # Verificar si la columna "CUFE/CUDE" existe en el archivo
                 if columna_a_iterar in df.columns:
                     # Iniciar la aplicación que se usará para la automatización
                     app_id = "shell:AppsFolder\\57778KONTALID.KONTALIDTools_1crwx9b2rpxma!com.embarcadero.KONTALIDTools"
                     process = subprocess.Popen(
                         ["explorer.exe", app_id], shell=True)
-                    
+
                     # Esperar a que la aplicación se inicie
                     time.sleep(5)
 
@@ -340,8 +353,7 @@ while ejecuciones_realizadas < max_ejecuciones:
                         else:
                             df.at[index, columna_procesado] = "No"
                             break
-                            
-                            
+
                         # Esperar la descarga del archivo PDF
                         tiempo_max_espera = 60
                         tiempo_transcurrido = 0
@@ -361,37 +373,45 @@ while ejecuciones_realizadas < max_ejecuciones:
 
                         # Mover el archivo descargado a la carpeta destino
                         if archivo_descargado:
-                            nombre_archivo = os.path.basename(archivo_descargado)
+                            nombre_archivo = os.path.basename(
+                                archivo_descargado)
                             # Ruta de la carpeta que quieres verificar
-                            ruta_carpeta = os.path.join(path_pdf, str(nit_receptor))
-                            
+                            ruta_carpeta = os.path.join(
+                                path_pdf, str(nit_receptor))
+
                             # Verificar si la carpeta existe
                             if not os.path.exists(ruta_carpeta):
                                 # Si no existe, crearla
                                 os.makedirs(ruta_carpeta)
-                                print(f"La carpeta '{ruta_carpeta}' ha sido creada.")
+                                print(
+                                    f"La carpeta '{ruta_carpeta}' ha sido creada.")
                             else:
-                                print(f"La carpeta '{ruta_carpeta}' ya existe.")
-                            
-                            destino_final = os.path.join(ruta_carpeta, nombre_archivo)
+                                print(
+                                    f"La carpeta '{ruta_carpeta}' ya existe.")
+
+                            destino_final = os.path.join(
+                                ruta_carpeta, nombre_archivo)
                             os.makedirs(ruta_carpeta, exist_ok=True)
-                            
+
                             # Mover el archivo a la nueva ubicación
                             shutil.move(archivo_descargado, destino_final)
-                            
+
                             # Verificar si el archivo se ha movido correctamente
                             if os.path.exists(destino_final):
-                                print(f"Archivo '{nombre_archivo}' movido exitosamente a: {destino_final}")
+                                print(
+                                    f"Archivo '{nombre_archivo}' movido exitosamente a: {destino_final}")
                                 # Marcar como procesado
                                 df.at[index, columna_procesado] = "Sí"
                             else:
-                                print(f"Error: El archivo '{nombre_archivo}' no se ha movido correctamente.")
+                                print(
+                                    f"Error: El archivo '{nombre_archivo}' no se ha movido correctamente.")
                                 df.at[index, columna_procesado] = "No"
                                 # No marcar como procesado si no se movió correctamente
                         else:
-                            print("No se encontró ningún archivo PDF dentro del tiempo esperado.")
+                            print(
+                                "No se encontró ningún archivo PDF dentro del tiempo esperado.")
                             continue  # Continuar con la siguiente iteración
-                        
+
                         # Extraer información del PDF
                         try:
                             with pdfplumber.open(destino_final) as pdf:
@@ -472,7 +492,7 @@ while ejecuciones_realizadas < max_ejecuciones:
             print(
                 "Todas las filas han sido procesadas. Deteniendo el bot antes de completar las 3 ejecuciones.")
             break
-        
+
     except Exception as e:
         print(f"Ocurrió un error al procesar el archivo: {e}")
         # Cerrar la aplicación después de procesar el archivo
