@@ -1,0 +1,9 @@
+selenium
+pandas
+openpyxl
+pdfplumber
+pytesseract
+pyautogui
+pillow
+pywin32
+nameparser

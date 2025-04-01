@@ -1,0 +1,21 @@
+{
+    "71313271": {
+        "nombre": "Gustavo Giraldo",
+        "centro de costo": "CTACORRIENTE-1",
+        "iva": "IVA 19 MV",
+        "codigo_iva": "73157001"
+
+    },
+    "901761320": {
+        "nombre": "MACEL  GROUP S.A.S",
+        "centro de costo": "varios",
+        "iva": "IVA 19% MV",
+        "codigo_iva":"5115700"
+    },
+    "901681529": {
+        "nombre": "GRUPO VISIT MEDELLIN TOURS S.A.S.",
+        "centro de costo": "nulo",
+        "iva": "IVA 19% MV",
+        "codigo_iva":""
+    }
+}

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+ACAFI/venv/
+.env
+
+# Datos y logs
+data
+plantilla/
+documentacion/
+logs/
+backups/
+*.log
+
+# Configuraciones
+config/config.json
+config/credenciales.json
+*.secret
+
+# Drivers
+drivers/
+
+# IDE
+.vscode/
+.idea/
