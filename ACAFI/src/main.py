@@ -253,10 +253,6 @@ def login(driver, user, pas):
             EC.element_to_be_clickable((By.XPATH, '//*[@id="login-submit"]'))
         ).click()
         logging.info("Login realizado exitosamente.")
-
-    except NoSuchElementException as e:
-        logging.error(f"Elemento no encontrado durante el login: {e}")
-        raise
     except TimeoutException as e:
         logging.error(f"Tiempo de espera agotado durante el login: {e}")
         raise
@@ -1066,7 +1062,6 @@ def obtener_y_mover_factura(driver, output_folder, pdf_routes, razon_social_vend
 
     try:
         logging.info("Esperando el texto de la factura...")
-
         # Esperar a que aparezca el texto de la factura
         texto_factura_compra = WebDriverWait(driver, TIMEOUT).until(
             EC.presence_of_element_located(
@@ -1203,6 +1198,16 @@ if __name__ == "__main__":
                     nit_receptor = re.split(r'[_(.]', nombre_archivo)[0]
                     # Bandera para controlar si todas las filas han sido procesadas
                     todas_filas_procesadas = False
+                    
+                    # Definir tamaño de lote
+                    TAMANO_LOTE = 5
+                    # Archivo para guardar progreso
+                    ARCHIVO_PROGRESO = os.path.join(config_folder, f"progreso.json")
+                    
+                     # Limpiar el archivo de progreso si existe
+                    if os.path.exists(ARCHIVO_PROGRESO):
+                        os.remove(ARCHIVO_PROGRESO)
+                        logging.warning("¡Se eliminó el archivo de progreso previo!")
 
                     while ejecuciones_realizadas < ejecuciones_maximas and not todas_filas_procesadas:
                         ejecuciones_realizadas += 1
@@ -1284,308 +1289,347 @@ if __name__ == "__main__":
                             login(driver, credenciales[nit_cliente ]["usuario"], credenciales[nit_cliente ]["contrasena"])
                             logging.info("Sesión iniciada correctamente.")
                             
-                            # Filtrar solo las filas que no han sido procesadas
-                            df_pendientes = df[df['PDF Generado'] != 'Sí']
-
                             # Bandera para controlar si el ingreso ya se realizó
                             ingreso_realizado = False
+                            
+                            # Cargar o inicializar progreso
+                            if os.path.exists(ARCHIVO_PROGRESO):
+                                with open(ARCHIVO_PROGRESO, 'r') as f:
+                                    progreso = json.load(f)
+                                lote_actual = progreso['ultimo_lote'] + 1
+                            else:
+                                progreso = {
+                                    'archivo': ruta_archivo,
+                                    'ultimo_lote': -1,
+                                    'filas_procesadas': 0
+                                }
+                                lote_actual = 0
+                                
+                            # Calcular lotes pendientes
+                            df_pendientes = df[df['PDF Generado'] != 'Sí']
+                            total_filas = len(df_pendientes)
+                            total_lotes = (total_filas + TAMANO_LOTE - 1) // TAMANO_LOTE
+                            
+                            # Procesar lotes pendientes
+                            for lote_num in range(lote_actual, total_lotes):
+                                inicio = lote_num * TAMANO_LOTE
+                                fin = min(inicio + TAMANO_LOTE, total_filas)
+                                lote = df_pendientes.iloc[inicio:fin]
+                                
+                                logging.info(f"Procesando lote {lote_num + 1}/{total_lotes} (filas {inicio+1}-{fin})")
 
-                            ###########################################################
-                            # Iterar sobre cada fila del DataFrame (archivo Excel)
-                            ###########################################################
-                            for index, row in df_pendientes.head(10).iterrows():  # Solo procesamos 10 filas por iteración
-                                try:
-                                    logging.info(
-                                        f"Procesando fila {index + 1} del archivo Excel.")
-
-                                    ###########################################################
-                                    # Extraer y procesar los datos de la fila actual del Excel
-                                    ###########################################################
-                                    datos_fila = procesar_fila_excel(row)
-                                    if not datos_fila:
-                                        logging.warning(
-                                            f"Fila {index + 1} no procesada correctamente. Saltando...")
-                                        continue
-                                    # Desempaquetar los datos de la fila
-                                    cufe, factura, fecha, iva, codigo_producto, nit_tercero, razon_social_vendedor, nombre_receptor, prefijo, consecutivo, tipo_documento, centro_costo_excel,valor_total = datos_fila
-                                    logging.info("Datos extraídos correctamente de la fila.")
-
-                                    ###########################################################
-                                    # Verificar si el valor de "CUFE/CUDE" está vacío
-                                    ###########################################################
-                                    if pd.isna(cufe):
-                                        logging.warning(
-                                            f"Fila {index + 1} tiene datos incompletos (CUFE/CUDE vacío). Saltando...")
-
-                                    output_folder = config["paths"]["output"]
-                                    ##########################################################
-                                    # leer los parametros del cliente de el config
-                                    ####################################################
-                                    nombre, centro_costo, iva_cliente,codigo_iva = obtener_informacion_por_nit(
-                                        nit_cliente , config_clientes, centro_costo_excel)
-                                    # Verificar si se encontró la información
-                                    if nombre is not None:
-                                        print(f"Información para el NIT {config_clientes}:")
-                                        print("Nombre:", nombre)
-                                        print("Centro de costo:", centro_costo)
-                                        print("IVA:", iva_cliente)
-                                    else:
-                                        print(
-                                            f"El NIT {config_clientes} no existe en el JSON.")
-                                    ###########################################################
-                                    # Formatear la fecha para el formato requerido
-                                    ###########################################################
-                                    # Formatear la fecha antes de usarla
-                                    fecha_formateada = formatear_fecha(fecha)
-
-                                    # Verificar y registrar la fecha formateada
-                                    if fecha_formateada:
-                                        logging.info(f"Fecha formateada: {fecha_formateada}")
-                                    else:
-                                        logging.error(
-                                            f"No se pudo formatear la fecha: {fecha}")
-                                    # Obtener la fecha actual
-                                    ahora = datetime.now()
-                                    año = ahora.strftime("%Y")
-                                    mes = ahora.strftime("%m")
-                                    dia = ahora.strftime("%d")
-
-                                    ruta_carpeta_log = os.path.join(
-                                        output_folder, str(nit_cliente ), año, mes, dia)
-
-                                    ##########################################################
-                                    # Construir la ruta del archivo PDF asociado al CUFE/CUDE
-                                    # \
-                                    pdf_folder = os.path.join(
-                                        config["paths"]["output"]
-                                    )
-                                    pdf_routes = os.path.join(
-                                        config["paths"]["pdf"],nit_cliente , f"{cufe}.pdf")
-                                    pdf_routes_json_path = os.path.join(
-                                        config["paths"]["config"], "pdf_routes.json")
-
-                                    if not os.path.isfile(pdf_routes):
-                                        logging.warning(
-                                            f"El archivo PDF no existe en la ruta: {pdf_routes}")
-                                        raise FileNotFoundError(
-                                            f"El archivo PDF no existe en la ruta: {pdf_routes}")
-
-                                    logging.info(f"Procesando archivo PDF: {pdf_routes}")
-
-                                    ###########################################################
-                                    # Ejecutar el script de manejo de PDFs
-                                    ###########################################################
-                                    script_pdf_path = os.path.join(
-                                        BASE_DIR,"src","main_pdf.py")
-                                    ejecutar_script_pdf(
-                                        script_pdf_path, pdf_routes_json_path, pdf_routes)
-                                    logging.info(
-                                        "Script de manejo de PDFs ejecutado correctamente.")
-
-                                    ###########################################################
-                                    # Cargar el archivo JSON con los datos extraídos de los PDFs
-                                    ###########################################################
-                                    json_datos_extraidos = os.path.join(
-                                        config["paths"]["config"], "datos_extraidos.json")
-                                    with open(json_datos_extraidos, "r", encoding="utf-8") as file:
-                                        datos_extraidos = json.load(file)
-                                    logging.info("Datos extraídos cargados correctamente.")
-
-                                    # Verificar si datos_extraidos es una lista y tiene al menos un elemento
-                                    if isinstance(datos_extraidos, list) and len(datos_extraidos) > 0:
-                                        # Acceder al primer elemento de la lista (que es un diccionario)
-                                        primer_elemento = datos_extraidos[0]
-
-                                        # Obtener la forma de pago (usando un valor predeterminado si la clave no existe)
-                                        forma_de_pago = primer_elemento.get(
-                                            "Forma de Pago", "Desconocido")
-                                        logging.info(f"Forma de pago: {forma_de_pago}")
-                                        valor = primer_elemento.get(
-                                            "Total Bruto Factura", "Desconocido")
-                                        logging.info(f"Total Bruto Factura: {valor}")
-                                    else:
-                                        logging.error(
-                                            "El archivo JSON no contiene una lista válida o está vacío.")
-                                        
-                                    ### ------------------apartado web-------------------------###
-
-                                    ###########################################################
-                                    # Ingresar los datos del cliente receptor en la aplicación web - 1
-                                    ###########################################################
-                                    if not ingresar_cliente(driver, nit_cliente , ingreso_realizado):
-                                        logging.warning(
-                                            "El ingreso ya se había realizado o hubo un error.")
-
-                                    logging.info(
-                                        "Ingreso del cliente realizado correctamente.")
-                                    ingreso_realizado = True
-
-                                    ########################################################
-                                    # función para saber si es una nota o un credito
-                                    ########################################################
-
-                                    # Llamamos a la función y almacenamos los resultados en variables específicas
-                                    contiene_nota_resultado, xpath_accion, mensaje_resultado = contiene_nota(
-                                        tipo_documento)
-
-                                    # Imprimimos los resultados
-                                    logging.info(
-                                        f"¿Contiene la palabra 'nota'? {contiene_nota_resultado}")
-                                    logging.info(f"Mensaje: {mensaje_resultado}")
-                                    # Tomamos decisiones basadas en el resultado booleano
-                                    if contiene_nota_resultado:
-                                        # Si contiene la palabra "nota", ejecutamos la función relacionada con Nota débito
-                                        accion_nota_debito(
-                                            driver, fecha_formateada, nit_tercero, xpath_accion, pdf_routes, ruta_carpeta_log)
-
-                                    else:
-                                        # El resto del código continúa normalmente
+                                ###########################################################
+                                # Iterar sobre cada fila del DataFrame (archivo Excel)
+                                ###########################################################
+                                for index, row in lote.iterrows():  # Solo procesamos 10 filas por iteración
+                                    try:
                                         logging.info(
-                                            "El resto del código continúa su ejecución...")
-                                        print("Continuando con el flujo normal del programa...")
+                                            f"Procesando fila {index + 1} del archivo Excel.")
 
                                         ###########################################################
-                                        # Crear factura de compra en la aplicación web -2
+                                        # Extraer y procesar los datos de la fila actual del Excel
                                         ###########################################################
-                                        crear_factura_compra(
-                                            driver, fecha_formateada, nit_tercero, xpath_accion,)
-                                        logging.info("Factura de compra creada correctamente.")
+                                        datos_fila = procesar_fila_excel(row)
+                                        if not datos_fila:
+                                            logging.warning(
+                                                f"Fila {index + 1} no procesada correctamente. Saltando...")
+                                            continue
+                                        # Desempaquetar los datos de la fila
+                                        cufe, factura, fecha, iva, codigo_producto, nit_tercero, razon_social_vendedor, nombre_receptor, prefijo, consecutivo, tipo_documento, centro_costo_excel,valor_total = datos_fila
+                                        logging.info("Datos extraídos correctamente de la fila.")
 
                                         ###########################################################
-                                        # Registrar la cuenta en la aplicación web con los datos extraídos -3
+                                        # Verificar si el valor de "CUFE/CUDE" está vacío
                                         ###########################################################
-                                        registrar_cuenta_en_web(
-                                            driver, datos_extraidos, nit_tercero, razon_social_vendedor)
+                                        if pd.isna(cufe):
+                                            logging.warning(
+                                                f"Fila {index + 1} tiene datos incompletos (CUFE/CUDE vacío). Saltando...")
+
+                                        output_folder = config["paths"]["output"]
+                                        ##########################################################
+                                        # leer los parametros del cliente de el config
+                                        ####################################################
+                                        nombre, centro_costo, iva_cliente,codigo_iva = obtener_informacion_por_nit(
+                                            nit_cliente , config_clientes, centro_costo_excel)
+                                        # Verificar si se encontró la información
+                                        if nombre is not None:
+                                            print(f"Información para el NIT {config_clientes}:")
+                                            print("Nombre:", nombre)
+                                            print("Centro de costo:", centro_costo)
+                                            print("IVA:", iva_cliente)
+                                        else:
+                                            print(
+                                                f"El NIT {config_clientes} no existe en el JSON.")
+                                        ###########################################################
+                                        # Formatear la fecha para el formato requerido
+                                        ###########################################################
+                                        # Formatear la fecha antes de usarla
+                                        fecha_formateada = formatear_fecha(fecha)
+
+                                        # Verificar y registrar la fecha formateada
+                                        if fecha_formateada:
+                                            logging.info(f"Fecha formateada: {fecha_formateada}")
+                                        else:
+                                            logging.error(
+                                                f"No se pudo formatear la fecha: {fecha}")
+                                        # Obtener la fecha actual
+                                        ahora = datetime.now()
+                                        año = ahora.strftime("%Y")
+                                        mes = ahora.strftime("%m")
+                                        dia = ahora.strftime("%d")
+
+                                        ruta_carpeta_log = os.path.join(
+                                            output_folder, str(nit_cliente ), año, mes, dia)
+
+                                        ##########################################################
+                                        # Construir la ruta del archivo PDF asociado al CUFE/CUDE
+                                        # \
+                                        pdf_folder = os.path.join(
+                                            config["paths"]["output"]
+                                        )
+                                        pdf_routes = os.path.join(
+                                            config["paths"]["pdf"],nit_cliente , f"{cufe}.pdf")
+                                        pdf_routes_json_path = os.path.join(
+                                            config["paths"]["config"], "pdf_routes.json")
+
+                                        if not os.path.isfile(pdf_routes):
+                                            logging.warning(
+                                                f"El archivo PDF no existe en la ruta: {pdf_routes}")
+                                            raise FileNotFoundError(
+                                                f"El archivo PDF no existe en la ruta: {pdf_routes}")
+
+                                        logging.info(f"Procesando archivo PDF: {pdf_routes}")
+
+                                        ###########################################################
+                                        # Ejecutar el script de manejo de PDFs
+                                        ###########################################################
+                                        script_pdf_path = os.path.join(
+                                            BASE_DIR,"src","main_pdf.py")
+                                        ejecutar_script_pdf(
+                                            script_pdf_path, pdf_routes_json_path, pdf_routes)
                                         logging.info(
-                                            "Cuenta registrada correctamente en la aplicación web.")
+                                            "Script de manejo de PDFs ejecutado correctamente.")
 
                                         ###########################################################
-                                        # Ingresar datos de la factura en la aplicación web -4
+                                        # Cargar el archivo JSON con los datos extraídos de los PDFs
                                         ###########################################################
-                                        ingresar_datos_factura(
-                                            driver, prefijo, consecutivo, codigo_producto, nit_tercero, valor, iva, iva_cliente, centro_costo,valor_total,codigo_iva)
+                                        json_datos_extraidos = os.path.join(
+                                            config["paths"]["config"], "datos_extraidos.json")
+                                        with open(json_datos_extraidos, "r", encoding="utf-8") as file:
+                                            datos_extraidos = json.load(file)
+                                        logging.info("Datos extraídos cargados correctamente.")
+
+                                        # Verificar si datos_extraidos es una lista y tiene al menos un elemento
+                                        if isinstance(datos_extraidos, list) and len(datos_extraidos) > 0:
+                                            # Acceder al primer elemento de la lista (que es un diccionario)
+                                            primer_elemento = datos_extraidos[0]
+
+                                            # Obtener la forma de pago (usando un valor predeterminado si la clave no existe)
+                                            forma_de_pago = primer_elemento.get(
+                                                "Forma de Pago", "Desconocido")
+                                            logging.info(f"Forma de pago: {forma_de_pago}")
+                                            valor = primer_elemento.get(
+                                                "Total Bruto Factura", "Desconocido")
+                                            logging.info(f"Total Bruto Factura: {valor}")
+                                        else:
+                                            logging.error(
+                                                "El archivo JSON no contiene una lista válida o está vacío.")
+                                            
+                                        ### ------------------apartado web-------------------------###
+
+                                        ###########################################################
+                                        # Ingresar los datos del cliente receptor en la aplicación web - 1
+                                        ###########################################################
+                                        if not ingresar_cliente(driver, nit_cliente , ingreso_realizado):
+                                            logging.warning(
+                                                "El ingreso ya se había realizado o hubo un error.")
+
                                         logging.info(
-                                            "Datos de la factura ingresados correctamente.")
+                                            "Ingreso del cliente realizado correctamente.")
+                                        ingreso_realizado = True
 
-                                    ###########################################################
-                                    # Obtener y mover la factura generada -5
-                                    ###########################################################
+                                        ########################################################
+                                        # función para saber si es una nota o un credito
+                                        ########################################################
 
-                                    numero_factura, resultado,output_pdf_path = obtener_y_mover_factura(
-                                        driver=driver,
-                                        output_folder=output_folder,
-                                        pdf_routes=pdf_routes,
-                                        razon_social_vendedor=razon_social_vendedor,
-                                        factura=factura,
-                                        ruta_carpeta_log=ruta_carpeta_log,
-                                    )
+                                        # Llamamos a la función y almacenamos los resultados en variables específicas
+                                        contiene_nota_resultado, xpath_accion, mensaje_resultado = contiene_nota(
+                                            tipo_documento)
 
-                                    if resultado:
-                                        logging.info("La factura se procesó correctamente.")
-                                        estado_procesamiento = "Exitoso"
-                                        mensaje_error = ""
-                                        # Actualizar la columna 'PDF Generado' a 'Sí'
-                                        df.at[index, 'PDF Generado'] = 'Sí'
-                                        # "Exitoso" o "Fallido"
-                                        df.at[index, 'Procesamiento Exitoso'] = 'Procesamiento Exitoso'
-                                        # Guardar el archivo Excel después de cada actualización
-                                        df.to_excel(
-                                            excel_routes["ruta_archivo.excel"], index=False)
+                                        # Imprimimos los resultados
                                         logging.info(
-                                            f"Archivo Excel actualizado en: {excel_routes['ruta_archivo.excel']}")
-                                    else:
-                                        logging.error(" Hubo un error al procesar la factura.")
-                                        estado_procesamiento = "Fallido"
-                                        mensaje_error = "Error al procesar la factura"
-                                        raise Exception(mensaje_error)
-                                    # Variable que ya tienes
-                                    df.at[index, 'Forma de Pago'] = forma_de_pago
-                                    # Mensaje de error si falló
-                                    df.at[index, 'Mensaje Error'] = mensaje_error
-                                    # Nombre del PDF generado
-                                    df.at[index, 'Nombre PDF'] = numero_factura
+                                            f"¿Contiene la palabra 'nota'? {contiene_nota_resultado}")
+                                        logging.info(f"Mensaje: {mensaje_resultado}")
+                                        # Tomamos decisiones basadas en el resultado booleano
+                                        if contiene_nota_resultado:
+                                            # Si contiene la palabra "nota", ejecutamos la función relacionada con Nota débito
+                                            accion_nota_debito(
+                                                driver, fecha_formateada, nit_tercero, xpath_accion, pdf_routes, ruta_carpeta_log)
 
-                                    # Guardar el archivo Excel después de cada actualización
-                                    df.to_excel(
-                                        excel_routes["ruta_archivo.excel"], index=False)
-                                except Exception as e:
-                                        logging.error(
-                                            f"Error al procesar la fila {index + 1}: {e}")
-                                        # Agregar los datos de la fila procesada al DataFrame de control con estado fallido
-                                        forma_de_pago = "null"
+                                        else:
+                                            # El resto del código continúa normalmente
+                                            logging.info(
+                                                "El resto del código continúa su ejecución...")
+                                            print("Continuando con el flujo normal del programa...")
+
+                                            ###########################################################
+                                            # Crear factura de compra en la aplicación web -2
+                                            ###########################################################
+                                            crear_factura_compra(
+                                                driver, fecha_formateada, nit_tercero, xpath_accion,)
+                                            logging.info("Factura de compra creada correctamente.")
+
+                                            ###########################################################
+                                            # Registrar la cuenta en la aplicación web con los datos extraídos -3
+                                            ###########################################################
+                                            registrar_cuenta_en_web(
+                                                driver, datos_extraidos, nit_tercero, razon_social_vendedor)
+                                            logging.info(
+                                                "Cuenta registrada correctamente en la aplicación web.")
+
+                                            ###########################################################
+                                            # Ingresar datos de la factura en la aplicación web -4
+                                            ###########################################################
+                                            ingresar_datos_factura(
+                                                driver, prefijo, consecutivo, codigo_producto, nit_tercero, valor, iva, iva_cliente, centro_costo,valor_total,codigo_iva)
+                                            logging.info(
+                                                "Datos de la factura ingresados correctamente.")
+
+                                        ###########################################################
+                                        # Obtener y mover la factura generada -5
+                                        ###########################################################
+
+                                        numero_factura, resultado,output_pdf_path = obtener_y_mover_factura(
+                                            driver=driver,
+                                            output_folder=output_folder,
+                                            pdf_routes=pdf_routes,
+                                            razon_social_vendedor=razon_social_vendedor,
+                                            factura=factura,
+                                            ruta_carpeta_log=ruta_carpeta_log,
+                                        )
+
+                                        if resultado:
+                                            logging.info("La factura se procesó correctamente.")
+                                            estado_procesamiento = "Exitoso"
+                                            mensaje_error = ""
+                                            # Actualizar la columna 'PDF Generado' a 'Sí'
+                                            df.at[index, 'PDF Generado'] = 'Sí'
+                                            progreso['filas_procesadas'] += 1
+                                            # "Exitoso" o "Fallido"
+                                            df.at[index, 'Procesamiento Exitoso'] = 'Procesamiento Exitoso'
+                                            # Guardar el archivo Excel después de cada actualización
+                                            df.to_excel(
+                                                excel_routes["ruta_archivo.excel"], index=False)
+                                            logging.info(
+                                                f"Archivo Excel actualizado en: {excel_routes['ruta_archivo.excel']}")
+                                        else:
+                                            logging.error(" Hubo un error al procesar la factura.")
+                                            estado_procesamiento = "Fallido"
+                                            mensaje_error = "Error al procesar la factura"
+                                            raise Exception(mensaje_error)
                                         # Variable que ya tienes
                                         df.at[index, 'Forma de Pago'] = forma_de_pago
                                         # Mensaje de error si falló
-                                        df.at[index, 'Mensaje Error'] = str(e)
+                                        df.at[index, 'Mensaje Error'] = mensaje_error
                                         # Nombre del PDF generado
-                                        df.at[index, 'Nombre PDF'] = ""
+                                        df.at[index, 'Nombre PDF'] = numero_factura
+                                        
                                         # Guardar el archivo Excel después de cada actualización
                                         df.to_excel(
                                             excel_routes["ruta_archivo.excel"], index=False)
-                            ###########################################################
-                            # Cerrar el navegador al finalizar
-                            ###########################################################
-                            if 'driver' in locals():
-                                driver.quit()
-                                logging.info("Navegador cerrado correctamente.")
-                            
-                            # Verificar si todas las filas ya están procesadas
-                            if all(df['PDF Generado'] == 'Sí'):
-                                logging.info(
-                                    "Todas las filas ya están procesadas. Finalizando ejecución.")
-                                todas_filas_procesadas = True
-                            else :
-                                ###########################################################
-                                # Esperar 5 minutos antes de la siguiente iteración
-                                ###########################################################
-                                logging.info("Esperando 5 minutos antes de la siguiente iteración...")
-                                time.sleep(300)  # 300 segundos = 5 minutos
-                            
-                        except Exception as e:
-                            logging.error(f"Error en la ejecución principal: {e}")
-                        
-                    # Enviar correo electrónico al finalizar
-                    # Extraer la lista de correos electrónicos
-                    correos = config.get("correos", [])
-                    enviar_correos(nombre_archivo,correos)
-
-                    # Mover y renombrar el archivo
-                    shutil.move(excel_routes["ruta_archivo.excel"], f"{ruta_carpeta_log}/{nit_cliente}.xlsx")
-                    logging.info(f"PDF movido a: {output_pdf_path}")
-                    # 2. Proceso de consolidación mensual con logging
-                    try:
-                        archivo_log = f"{ruta_carpeta_log}/{nit_cliente}.xlsx"
-                        df_nuevo = pd.read_excel(archivo_log)
-                        
-                        # Validación de estructura
-                        if 'Fecha Emisión' not in df_nuevo.columns:
-                            logging.warning("El archivo no contiene columna 'Fecha'. No se puede clasificar por mes.")
-                        else:
-                            fecha = pd.to_datetime(df_nuevo['Fecha'].iloc[0])
-                            nombre_mes = fecha.strftime("%Y-%m")
-                            archivo_mes = f"facturas_{nombre_mes}.xlsx"
-                            ruta_mes = os.path.join("facturas_mensuales", archivo_mes)
-                            
-                            # Crear directorio si no existe
-                            os.makedirs(os.path.dirname(ruta_mes), exist_ok=True)
-                            
-                            if os.path.exists(ruta_mes):
-                                df_existente = pd.read_excel(ruta_mes)
+                                    except Exception as e:
+                                            logging.error(
+                                                f"Error al procesar la fila {index + 1}: {e}")
+                                            # Agregar los datos de la fila procesada al DataFrame de control con estado fallido
+                                            forma_de_pago = "null"
+                                            # Variable que ya tienes
+                                            df.at[index, 'Forma de Pago'] = forma_de_pago
+                                            # Mensaje de error si falló
+                                            df.at[index, 'Mensaje Error'] = str(e)
+                                            # Nombre del PDF generado
+                                            df.at[index, 'Nombre PDF'] = ""
+                                            # procesamiento no exitoso
+                                            df.at[index, 'Procesamiento Exitoso'] = "Fallido"
+                                            # Guardar el archivo Excel después de cada actualización
+                                            df.to_excel(
+                                                excel_routes["ruta_archivo.excel"], index=False)
+                                                                # Actualizar progreso después de cada lote
+                                                                
+                                progreso['ultimo_lote'] = lote_num
+                                with open(ARCHIVO_PROGRESO, 'w') as f:
+                                    json.dump(progreso, f)    
                                 
-                                df_final = pd.concat([df_existente, df_nuevo], ignore_index=True)
-                                logging.info(f"Archivo {archivo_mes} actualizado con {len(df_nuevo)} nuevos registros")
-                            else:
-                                df_final = df_nuevo
-                                logging.info(f"Archivo mensual {archivo_mes} creado con {len(df_nuevo)} registros")
-                            
-                            df_final.to_excel(ruta_mes, index=False)
-                            logging.info(f"Consolidación mensual completada: {ruta_mes}")
+                                # Guardar cambios en el Excel
+                                df.to_excel(ruta_archivo, index=False)
+                                logging.info(f"Progreso guardado. Lote {lote_num + 1} completado.")
+                                
+                                # Verificar si se completó todo
+                                if len(df[df['PDF Generado'] != 'Sí']) == 0:
+                                    todas_filas_procesadas = True
+                                    if os.path.exists(ARCHIVO_PROGRESO):
+                                        os.remove(ARCHIVO_PROGRESO)
+                                    logging.info("¡Todo el archivo Excel ha sido procesado con éxito!")
+                                else:
+                                    ###########################################################
+                                    # Esperar 5 minutos antes de la siguiente iteración
+                                    ###########################################################
+                                    logging.info("Esperando 5 minutos antes de la siguiente iteración...")
+                                    time.sleep(300)  # 300 segundos = 5 minutos         
+                                    
+                        except Exception as e:
+                            logging.error(f"Error durante la ejecución del lote: {str(e)}")
+                            if ejecuciones_realizadas == ejecuciones_maximas:
+                                logging.error("Se alcanzó el máximo de intentos. Abortando.")
+                                raise
+                    ###########################################################
+                    # Cerrar el navegador al finalizar
+                    ###########################################################
+                    if 'driver' in locals():
+                        driver.quit()
+                        logging.info("Navegador cerrado correctamente.")
+                except Exception as e:
+                    logging.error(f"Error en la ejecución principal: {e}")
+                        
+                # Enviar correo electrónico al finalizar
+                # Extraer la lista de correos electrónicos
+                correos = config.get("correos", [])
+                enviar_correos(nombre_archivo,correos)
 
-                    except Exception as e:
-                        logging.error(f"Error en consolidación mensual: {str(e)}", exc_info=True)
-                    logging.info("Ejecución finalizada.")
+                # Mover y renombrar el archivo
+                shutil.move(excel_routes["ruta_archivo.excel"], f"{ruta_carpeta_log}/{nit_cliente}.xlsx")
+                logging.info(f"PDF movido a: {output_pdf_path}")
+                # 2. Proceso de consolidación mensual con logging
+                try:
+                    archivo_log = f"{ruta_carpeta_log}/{nit_cliente}.xlsx"
+                    df_nuevo = pd.read_excel(archivo_log)
+                    
+                    # Validación de estructura
+                    if 'Fecha Emisión' not in df_nuevo.columns:
+                        logging.warning("El archivo no contiene columna 'Fecha'. No se puede clasificar por mes.")
+                    else:
+                        fecha = pd.to_datetime(df_nuevo['Fecha'].iloc[0])
+                        nombre_mes = fecha.strftime("%Y-%m")
+                        archivo_mes = f"facturas_{nombre_mes}.xlsx"
+                        ruta_mes = os.path.join("facturas_mensuales", archivo_mes)
+                        
+                        # Crear directorio si no existe
+                        os.makedirs(os.path.dirname(ruta_mes), exist_ok=True)
+                        
+                        if os.path.exists(ruta_mes):
+                            df_existente = pd.read_excel(ruta_mes)
+                            
+                            df_final = pd.concat([df_existente, df_nuevo], ignore_index=True)
+                            logging.info(f"Archivo {archivo_mes} actualizado con {len(df_nuevo)} nuevos registros")
+                        else:
+                            df_final = df_nuevo
+                            logging.info(f"Archivo mensual {archivo_mes} creado con {len(df_nuevo)} registros")
+                        
+                        df_final.to_excel(ruta_mes, index=False)
+                        logging.info(f"Consolidación mensual completada: {ruta_mes}")
 
                 except Exception as e:
-                    logging.error(f"Error al procesar el archivo {ruta_archivo}: {e}")           
+                    logging.error(f"Error en consolidación mensual: {str(e)}", exc_info=True)
+                logging.info("Ejecución finalizada.")
+
     except Exception as e:
-        logging.error(f"Error al buscar archivos Excel en la carpeta: {e}")
+        logging.error(f"Error al procesar el archivo {ruta_archivo}: {e}")

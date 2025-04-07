@@ -120,7 +120,7 @@ def accion_nota_debito(driver, fecha_formateada, nit_emisor, xpath_accion, pdf_r
             By.CSS_SELECTOR, xpath_accion).click()
         logging.info(
             "Clic en 'Factura de compra / Gasto' realizado correctamente.")
-        time.sleep(1)
+        time.sleep(5)
 
         # Ingresar el No. de compra / Doc. Soporte
         logging.info("Seleccionando el tipo de factura...")

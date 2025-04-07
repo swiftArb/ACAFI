@@ -184,11 +184,11 @@ while ejecuciones_realizadas < max_ejecuciones:
                     continue  # Saltar este archivo y continuar con el siguiente
 
                 # Filtrar filas que NO estén en la lista de exclusión
-                df_filtrado = df[~df["Tipo de documento"].astype(
+                df = df[~df["Tipo de documento"].astype(
                     str).str.strip().isin(documentos_excluir)]
 
                 # Sobrescribir el archivo original con el filtrado sin índice
-                df_filtrado.to_excel(
+                df.to_excel(
                     ruta_archivo, index=False, engine="openpyxl")
 
                 # Guardar la ruta en un JSON
